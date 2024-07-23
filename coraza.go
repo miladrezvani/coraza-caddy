@@ -5,25 +5,53 @@ package coraza
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/caddyserver/caddy/v2"
 	"github.com/caddyserver/caddy/v2/caddyconfig/caddyfile"
 	"github.com/caddyserver/caddy/v2/caddyconfig/httpcaddyfile"
+	caddycmd "github.com/caddyserver/caddy/v2/cmd"
 	"github.com/caddyserver/caddy/v2/modules/caddyhttp"
+	"github.com/corazawaf/coraza-caddy/v2/modules/caddyhttp/reverseproxy"
 	coreruleset "github.com/corazawaf/coraza-coreruleset"
 	"github.com/corazawaf/coraza/v3"
 	"github.com/corazawaf/coraza/v3/types"
 	"github.com/jcchavezs/mergefs"
 	"github.com/jcchavezs/mergefs/io"
 	"go.uber.org/zap"
+
+	"github.com/spf13/cobra"
 )
 
 func init() {
 	caddy.RegisterModule(corazaModule{})
 	httpcaddyfile.RegisterHandlerDirective("coraza_waf", parseCaddyfile)
+	caddycmd.RegisterCommand(caddycmd.Command{
+		Name:  "uucwaf",
+		Usage: `[--directory <path>] [--from <addr>] [--to <addr>] [--change-host-header] [--insecure] [--internal-certs] [--disable-redirects] [--header-up "Field: value"] [--header-down "Field: value"] [--access-log] [--debug]`,
+		Short: "Add rules from directory",
+		Long: `
+		EXPERIMENTAL: May be changed or removed.
+		`,
+		CobraFunc: func(cmd *cobra.Command) {
+			cmd.Flags().StringP("rules", "R", "", "The input directory")
+			cmd.Flags().StringP("from", "f", "localhost", "Address on which to receive traffic")
+			cmd.Flags().StringSliceP("to", "t", []string{}, "Upstream address(es) to which traffic should be sent")
+			cmd.Flags().BoolP("change-host-header", "c", false, "Set upstream Host header to address of upstream")
+			cmd.Flags().BoolP("insecure", "", false, "Disable TLS verification (WARNING: DISABLES SECURITY BY NOT VERIFYING TLS CERTIFICATES!)")
+			cmd.Flags().BoolP("disable-redirects", "r", false, "Disable HTTP->HTTPS redirects")
+			cmd.Flags().BoolP("internal-certs", "i", false, "Use internal CA for issuing certs")
+			cmd.Flags().StringSliceP("header-up", "H", []string{}, "Set a request header to send to the upstream (format: \"Field: value\")")
+			cmd.Flags().StringSliceP("header-down", "d", []string{}, "Set a response header to send back to the client (format: \"Field: value\")")
+			cmd.Flags().BoolP("access-log", "", false, "Enable the access log")
+			cmd.Flags().BoolP("debug", "v", false, "Enable verbose debug logs")
+			cmd.RunE = caddycmd.WrapCommandFuncForCobra(parseCommandLine)
+		},
+	})
 }
 
 // corazaModule is a Web Application Firewall implementation for Caddy.
@@ -208,6 +236,42 @@ func newErrorCb(logger *zap.Logger) func(types.MatchedRule) {
 	}
 }
 
+func parseCommandLine(fl caddycmd.Flags) (int, error) {
+	var m corazaModule
+	err := m.ParseCmdLine(fl)
+
+	reverseproxy.CmdReverseProxy(fl, m)
+	return caddy.ExitCodeSuccess, err
+}
+
+func (m *corazaModule) ParseCmdLine(fl caddycmd.Flags) error {
+	fmt.Println("Parsing:",fl.String("rules"))
+	m.LoadOWASPCRS = true
+	if fl.String("rules") != "" {
+		// to get directory
+		dir := strings.TrimSpace(fl.String("rules"))
+		// to read file names
+		f, err := os.Open(dir)
+		if err != nil {
+			fmt.Println(err)
+		}
+		files, err := f.Readdir(0)
+		if err != nil {
+			fmt.Println(err)
+		}
+		for _, v := range files {
+			if (v.Name() == "crs-setup.conf.example" || v.Name() == "coraza.conf-recommended") && !v.IsDir() {
+				m.Directives = m.Directives + "Include " + dir + "/" + v.Name() + "\n"
+			}else if v.Name() == "@owasp_crs" && v.IsDir() {
+				m.Directives = m.Directives + "Include " + dir + "/" + v.Name() + "/*.conf" + "\n"
+			}else {
+				fmt.Println("file not matched")
+			}
+		}
+		fmt.Println(m.Directives);
+	}
+	return nil
+}
 // Interface guards
 var (
 	_ caddy.Provisioner           = (*corazaModule)(nil)

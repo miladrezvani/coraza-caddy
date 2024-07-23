@@ -2,7 +2,7 @@ module github.com/corazawaf/coraza-caddy/v2
 
 go 1.21.0
 
-toolchain go1.21.11
+toolchain go1.22.5
 
 require (
 	github.com/caddyserver/caddy/v2 v2.8.4
@@ -10,6 +10,7 @@ require (
 	github.com/corazawaf/coraza/v3 v3.2.1
 	github.com/jcchavezs/mergefs v0.0.0-20230503083351-07f27d256761
 	github.com/magefile/mage v1.15.0
+	github.com/spf13/cobra v1.8.0
 	github.com/stretchr/testify v1.9.0
 	go.uber.org/zap v1.27.0
 )
@@ -109,7 +110,6 @@ require (
 	github.com/smallstep/scep v0.0.0-20231024192529-aee96d7ad34d // indirect
 	github.com/smallstep/truststore v0.13.0 // indirect
 	github.com/spf13/cast v1.4.1 // indirect
-	github.com/spf13/cobra v1.8.0 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
 	github.com/stoewer/go-strcase v1.2.0 // indirect
 	github.com/tailscale/tscert v0.0.0-20240517230440-bbccfbf48933 // indirect
