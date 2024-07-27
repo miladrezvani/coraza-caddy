@@ -246,6 +246,7 @@ func parseCommandLine(fl caddycmd.Flags) (int, error) {
 
 func (m *corazaModule) ParseCmdLine(fl caddycmd.Flags) error {
 	fmt.Println("Parsing:",fl.String("rules"))
+	flag := true
 	m.LoadOWASPCRS = true
 	if fl.String("rules") != "" {
 		// to get directory
@@ -264,8 +265,9 @@ func (m *corazaModule) ParseCmdLine(fl caddycmd.Flags) error {
 				m.Directives = m.Directives + "Include " + dir + "/" + v.Name() + "\n"
 			}else if v.Name() == "@owasp_crs" && v.IsDir() {
 				m.Directives = m.Directives + "Include " + dir + "/" + v.Name() + "/*.conf" + "\n"
-			}else {
-				fmt.Println("file not matched")
+			}else if strings.Contains(v.Name(), ".conf") && flag {
+				m.Directives = m.Directives + "Include " + dir + "/*.conf" + "\n"
+				flag = false
 			}
 		}
 		fmt.Println(m.Directives);
