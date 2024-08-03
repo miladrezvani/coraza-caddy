@@ -33,7 +33,7 @@ func init() {
 	caddycmd.RegisterCommand(caddycmd.Command{
 		Name:  "uucwaf",
 		Usage: `[--directory <path>] [--from <addr>] [--to <addr>] [--change-host-header] [--insecure] [--internal-certs] [--disable-redirects] [--header-up "Field: value"] [--header-down "Field: value"] [--access-log] [--debug]`,
-		Short: "Add rules from directory",
+		Short: "Read rules from directory",
 		Long: `
 		EXPERIMENTAL: May be changed or removed.
 		`,
@@ -60,6 +60,11 @@ type corazaModule struct {
 	Include      []string `json:"include"`
 	Directives   string   `json:"directives"`
 	LoadOWASPCRS bool     `json:"load_owasp_crs"`
+	Whitelist    []string `json:"whitelist"`
+    Blacklist    []string `json:"blacklist"`
+
+	WList caddyhttp.MatchClientIP
+	BList caddyhttp.MatchClientIP
 
 	logger *zap.Logger
 	waf    coraza.WAF
@@ -75,12 +80,18 @@ func (corazaModule) CaddyModule() caddy.ModuleInfo {
 
 // Provision implements caddy.Provisioner.
 func (m *corazaModule) Provision(ctx caddy.Context) error {
+
+	m.BList.Ranges = m.Blacklist
+	m.BList.Provision(caddy.Context{})
+
+	m.WList.Ranges = m.Whitelist
+	m.WList.Provision(caddy.Context{})
+
 	m.logger = ctx.Logger(m)
 
 	config := coraza.NewWAFConfig().
 		WithErrorCallback(newErrorCb(m.logger)).
 		WithDebugLogger(newLogger(m.logger))
-
 	if m.LoadOWASPCRS {
 		config = config.WithRootFS(mergefs.Merge(coreruleset.FS, io.OSFS))
 	}
@@ -124,6 +135,16 @@ var errInterruptionTriggered = errors.New("interruption triggered")
 
 // ServeHTTP implements caddyhttp.MiddlewareHandler.
 func (m corazaModule) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyhttp.Handler) error {
+
+		if m.BList.Match(r) {
+			http.Error(w, "Forbidden", http.StatusForbidden)
+			return nil
+		}
+
+		if m.WList.Match(r) {
+			return next.ServeHTTP(w, r)
+		}
+
 	id := randomString(16)
 	tx := m.waf.NewTransactionWithID(id)
 	defer func() {
@@ -177,6 +198,34 @@ func (m *corazaModule) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
 	for d.NextBlock(0) {
 		key := d.Val()
 		switch key {
+		case "whitelist":
+			var value string
+			if !d.Args(&value) {
+				// not enough args
+				return d.ArgErr()
+			}
+
+			m.Whitelist = append(m.Whitelist, d.Val())
+
+			for d.NextArg() {
+				// too many args
+				m.Whitelist = append(m.Whitelist, d.Val())
+			}
+
+		case "blacklist":
+			var value string
+			if !d.Args(&value) {
+				// not enough args
+				return d.ArgErr()
+			}
+
+			m.Blacklist = append(m.Blacklist, d.Val())
+
+			for d.NextArg() {
+				// too many args
+				m.Blacklist = append(m.Blacklist, d.Val())
+			}
+
 		case "load_owasp_crs":
 			if d.NextArg() {
 				return d.ArgErr()
@@ -254,11 +303,11 @@ func (m *corazaModule) ParseCmdLine(fl caddycmd.Flags) error {
 		// to read file names
 		f, err := os.Open(dir)
 		if err != nil {
-			fmt.Println(err)
+			return err
 		}
 		files, err := f.Readdir(0)
 		if err != nil {
-			fmt.Println(err)
+			return err
 		}
 		for _, v := range files {
 			if (v.Name() == "crs-setup.conf.example" || v.Name() == "coraza.conf-recommended") && !v.IsDir() {
